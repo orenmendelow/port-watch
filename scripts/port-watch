@@ -1,0 +1,55 @@
+#!/bin/bash
+# port-watch — CLI companion for PortWatch.app
+# Reads ~/.port-watch/ports.json or falls back to lsof
+
+JSON_FILE="$HOME/.port-watch/ports.json"
+
+format_output() {
+    local json="$1"
+    local count
+    count=$(echo "$json" | /usr/bin/python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['ports']))" 2>/dev/null)
+
+    if [ "$count" = "0" ] || [ -z "$count" ]; then
+        echo "No dev ports active."
+        return
+    fi
+
+    printf "%-16s %6s  %s\n" "PROCESS" "PORT" "PID"
+    printf "%-16s %6s  %s\n" "───────" "────" "───"
+    echo "$json" | /usr/bin/python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for p in sorted(d['ports'], key=lambda x: x['port']):
+    print(f\"{p['process']:<16} {p['port']:>6}  {p['pid']}\")
+"
+}
+
+# If JSON sidecar exists and is fresh (< 10 seconds old), use it
+if [ -f "$JSON_FILE" ]; then
+    age=$(( $(date +%s) - $(stat -f %m "$JSON_FILE") ))
+    if [ "$age" -lt 10 ]; then
+        format_output "$(cat "$JSON_FILE")"
+        exit 0
+    fi
+fi
+
+# Fallback: run lsof directly
+echo "(PortWatch app not running — scanning directly)"
+echo ""
+
+DEV_PROCS="node|python|python3|ruby|java|go|deno|bun|cargo|php|uvicorn|gunicorn|next|vite|webpack|esbuild|flask|django|rails|swift|dotnet|hugo|gatsby|nuxt|remix|astro|tsx|ts-node|npx|yarn|pnpm|nginx|httpd|caddy|postgres|mysqld|mongod|redis-server"
+
+output=$(lsof -iTCP -sTCP:LISTEN -nP 2>/dev/null | tail -n +2 | awk '{print $1, $2, $9}' | grep -E "^($DEV_PROCS) " | while read proc pid name; do
+    port=$(echo "$name" | rev | cut -d: -f1 | rev)
+    if [ -n "$port" ] && [ "$port" -eq "$port" ] 2>/dev/null; then
+        printf "%-16s %6s  %s\n" "$proc" "$port" "$pid"
+    fi
+done | sort -t' ' -k2 -n | uniq)
+
+if [ -z "$output" ]; then
+    echo "No dev ports active."
+else
+    printf "%-16s %6s  %s\n" "PROCESS" "PORT" "PID"
+    printf "%-16s %6s  %s\n" "───────" "────" "───"
+    echo "$output"
+fi
