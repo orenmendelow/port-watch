@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-APP_BUNDLE="$HOME/Applications/PortWatch.app"
+APP_BUNDLE="/Applications/PortWatch.app"
 LAUNCH_AGENT="$HOME/Library/LaunchAgents/com.oren.port-watch.plist"
 CLI_TARGET="/usr/local/bin/port-watch"
 
