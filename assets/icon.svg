@@ -1,38 +1,30 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
     <clipPath id="rounded">
-      <rect width="512" height="512" rx="96" ry="96"/>
+      <rect width="512" height="512" rx="112" ry="112"/>
     </clipPath>
   </defs>
   <g clip-path="url(#rounded)">
-    <!-- Background -->
-    <rect width="512" height="512" fill="#1A1A2E"/>
+    <rect width="512" height="512" fill="#0F0F1A"/>
 
-    <!-- Radar rings — concentric arcs from center-bottom -->
-    <circle cx="256" cy="384" r="100" fill="none" stroke="#4FC3F7" stroke-width="2" stroke-opacity="0.15"/>
-    <circle cx="256" cy="384" r="170" fill="none" stroke="#4FC3F7" stroke-width="2" stroke-opacity="0.25"/>
-    <circle cx="256" cy="384" r="240" fill="none" stroke="#4FC3F7" stroke-width="2" stroke-opacity="0.35"/>
-    <circle cx="256" cy="384" r="310" fill="none" stroke="#4FC3F7" stroke-width="2.5" stroke-opacity="0.45"/>
+    <!-- Large bold antenna mast -->
+    <rect x="244" y="160" width="24" height="200" rx="12" fill="#4FC3F7"/>
 
-    <!-- Antenna / mast — vertical line from center bottom -->
-    <line x1="256" y1="384" x2="256" y2="148" stroke="#4FC3F7" stroke-width="4" stroke-linecap="round"/>
+    <!-- Antenna base plate -->
+    <rect x="206" y="340" width="100" height="20" rx="10" fill="#4FC3F7"/>
 
-    <!-- Antenna tip — small diamond -->
-    <polygon points="256,132 264,148 256,164 248,148" fill="#4FC3F7"/>
+    <!-- Signal waves — thick, bold arcs -->
+    <!-- Left waves -->
+    <path d="M 220 220 A 60 60 0 0 0 220 300" fill="none" stroke="#4FC3F7" stroke-width="14" stroke-linecap="round" stroke-opacity="0.9"/>
+    <path d="M 180 190 A 110 110 0 0 0 180 330" fill="none" stroke="#4FC3F7" stroke-width="14" stroke-linecap="round" stroke-opacity="0.55"/>
+    <path d="M 140 164 A 160 160 0 0 0 140 356" fill="none" stroke="#4FC3F7" stroke-width="14" stroke-linecap="round" stroke-opacity="0.3"/>
 
-    <!-- Signal dots — active ports -->
-    <circle cx="172" cy="248" r="8" fill="#4FC3F7"/>
-    <circle cx="340" cy="248" r="8" fill="#4FC3F7"/>
-    <circle cx="256" cy="196" r="8" fill="#4FC3F7"/>
+    <!-- Right waves -->
+    <path d="M 292 220 A 60 60 0 0 1 292 300" fill="none" stroke="#4FC3F7" stroke-width="14" stroke-linecap="round" stroke-opacity="0.9"/>
+    <path d="M 332 190 A 110 110 0 0 1 332 330" fill="none" stroke="#4FC3F7" stroke-width="14" stroke-linecap="round" stroke-opacity="0.55"/>
+    <path d="M 372 164 A 160 160 0 0 1 372 356" fill="none" stroke="#4FC3F7" stroke-width="14" stroke-linecap="round" stroke-opacity="0.3"/>
 
-    <!-- Port number colon motif — two small squares stacked -->
-    <rect x="132" y="320" width="6" height="6" rx="1" fill="#4FC3F7" fill-opacity="0.5"/>
-    <rect x="132" y="332" width="6" height="6" rx="1" fill="#4FC3F7" fill-opacity="0.5"/>
-
-    <rect x="374" y="320" width="6" height="6" rx="1" fill="#4FC3F7" fill-opacity="0.5"/>
-    <rect x="374" y="332" width="6" height="6" rx="1" fill="#4FC3F7" fill-opacity="0.5"/>
-
-    <!-- Subtle crosshair lines -->
-    <line x1="196" y1="384" x2="316" y2="384" stroke="#4FC3F7" stroke-width="1.5" stroke-opacity="0.2"/>
+    <!-- Antenna tip dot -->
+    <circle cx="256" cy="148" r="18" fill="#4FC3F7"/>
   </g>
 </svg>
