@@ -3,6 +3,7 @@ import Combine
 
 final class PortScanner: ObservableObject {
     @Published var ports: [PortInfo] = []
+    @Published var sessions: [TerminalSession] = []
 
     private var timer: Timer?
 
@@ -35,8 +36,10 @@ final class PortScanner: ObservableObject {
     private func scan() {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let results = Self.runLsof()
+            let termSessions = Self.scanTerminalSessions()
             DispatchQueue.main.async {
                 self?.ports = results
+                self?.sessions = termSessions
                 Self.writeJSON(results)
             }
         }
@@ -58,6 +61,166 @@ final class PortScanner: ObservableObject {
         let isSuspended = ports.first(where: { $0.pid == pid })?.isSuspended ?? false
         kill(Int32(pid), isSuspended ? SIGCONT : SIGSTOP)
         scan()
+    }
+
+
+
+    // MARK: - Terminal sessions
+
+    /// Get the list of Terminal.app TTYs via AppleScript, then aggregate
+    /// CPU/MEM for all processes on each TTY and label with the most
+    /// meaningful process running in it.
+    static func scanTerminalSessions() -> [TerminalSession] {
+        // 1. Get TTYs from Terminal.app
+        let ttys = getTerminalTTYs()
+        guard !ttys.isEmpty else { return [] }
+
+        // 2. Get all processes with tty, cpu, rss, comm in one ps call
+        let proc = Process()
+        let pipe = Pipe()
+        proc.executableURL = URL(fileURLWithPath: "/bin/ps")
+        proc.arguments = ["-e", "-o", "tty=,pcpu=,rss=,pid=,comm="]
+        proc.standardOutput = pipe
+        proc.standardError = FileHandle.nullDevice
+        try? proc.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        proc.waitUntilExit()
+        guard let output = String(data: data, encoding: .utf8) else { return [] }
+
+        // Group processes by tty
+        struct ProcEntry {
+            let cpu: Double
+            let rssKB: Double
+            let pid: Int
+            let comm: String
+        }
+
+        var byTTY: [String: [ProcEntry]] = [:]
+        for line in output.components(separatedBy: "\n") {
+            let parts = line.trimmingCharacters(in: .whitespaces)
+                .split(separator: " ", maxSplits: 4, omittingEmptySubsequences: true)
+            guard parts.count >= 5 else { continue }
+            let tty = String(parts[0])
+            guard tty != "??" else { continue }
+            let cpu = Double(parts[1]) ?? 0
+            let rss = Double(parts[2]) ?? 0
+            let pid = Int(parts[3]) ?? 0
+            let comm = String(parts[4])
+            let devTTY = "/dev/" + tty
+            if ttys.keys.contains(devTTY) {
+                byTTY[devTTY, default: []].append(ProcEntry(cpu: cpu, rssKB: rss, pid: pid, comm: comm))
+            }
+        }
+
+        // 3. For each tty, aggregate stats and pick a label
+        let shellNames: Set<String> = ["login", "-zsh", "zsh", "-bash", "bash", "-sh", "sh"]
+        var results: [TerminalSession] = []
+
+        for (tty, info) in ttys {
+            let procs = byTTY[tty] ?? []
+            let totalCPU = procs.reduce(0) { $0 + $1.cpu }
+            let totalMem = procs.reduce(0) { $0 + $1.rssKB } / 1024.0
+
+            // Find the most interesting process (highest CPU, excluding shells)
+            let interesting = procs
+                .filter { !shellNames.contains($0.comm) }
+                .sorted { $0.cpu > $1.cpu }
+
+            var label = "idle"
+            if let top = interesting.first {
+                // Check if it's claude — if so, find what project via cwd
+                if top.comm == "claude" {
+                    let cwd = getProcessCwd(pid: top.pid)
+                    if !cwd.isEmpty, cwd != "/" {
+                        let dirName = (cwd as NSString).lastPathComponent
+                        let home = FileManager.default.homeDirectoryForCurrentUser.path
+                        if cwd != home {
+                            label = "claude · \(dirName)"
+                        } else {
+                            label = "claude"
+                        }
+                    } else {
+                        label = "claude"
+                    }
+                } else if top.comm.hasPrefix("sourcekit") {
+                    // sourcekit-lsp is noise, skip to next
+                    let next = interesting.first { !$0.comm.hasPrefix("sourcekit") && $0.comm != "claude" }
+                    label = next?.comm ?? (interesting.contains { $0.comm == "claude" } ? "claude" : "idle")
+                } else {
+                    label = top.comm
+                }
+            }
+
+            results.append(TerminalSession(
+                tty: tty,
+                label: label,
+                cpuPercent: totalCPU,
+                memMB: totalMem,
+                windowIndex: info.window,
+                tabIndex: info.tab
+            ))
+        }
+
+        return results.sorted { $0.cpuPercent > $1.cpuPercent }
+    }
+
+    private static func getTerminalTTYs() -> [String: (window: Int, tab: Int)] {
+        let script = """
+        tell application "Terminal"
+            set output to ""
+            set winIdx to 0
+            repeat with w in windows
+                set winIdx to winIdx + 1
+                set tabIdx to 0
+                repeat with t in tabs of w
+                    set tabIdx to tabIdx + 1
+                    try
+                        set output to output & (tty of t) & "," & winIdx & "," & tabIdx & linefeed
+                    end try
+                end repeat
+            end repeat
+            return output
+        end tell
+        """
+
+        let proc = Process()
+        let pipe = Pipe()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        proc.arguments = ["-e", script]
+        proc.standardOutput = pipe
+        proc.standardError = FileHandle.nullDevice
+        try? proc.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        proc.waitUntilExit()
+
+        guard let output = String(data: data, encoding: .utf8) else { return [:] }
+
+        var result: [String: (window: Int, tab: Int)] = [:]
+        for line in output.components(separatedBy: "\n") {
+            let parts = line.split(separator: ",")
+            guard parts.count >= 3,
+                  let win = Int(parts[1]),
+                  let tab = Int(parts[2]) else { continue }
+            result[String(parts[0])] = (win, tab)
+        }
+        return result
+    }
+
+    func focusTerminalSession(_ session: TerminalSession) {
+        let script = """
+        tell application "Terminal"
+            set index of window \(session.windowIndex) to 1
+            set selected of tab \(session.tabIndex) of window 1 to true
+            activate
+        end tell
+        """
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        proc.arguments = ["-e", script]
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = FileHandle.nullDevice
+        try? proc.run()
+        proc.waitUntilExit()
     }
 
     // MARK: - Scanning
@@ -111,8 +274,14 @@ final class PortScanner: ObservableObject {
             seen.insert(port)
 
             let address = String(nameField[nameField.startIndex..<colonIdx])
+            let projectCwd = getProcessCwd(pid: pid)
+
+            // Skip processes with no real project directory — these are app-embedded
+            // runtimes (Autodesk Fusion's node, Figma's node, etc.), not dev servers.
+            guard !projectCwd.isEmpty, projectCwd != "/" else { continue }
+
             let label = resolveServerLabel(pid: pid, fallback: processName)
-            let project = resolveProjectName(pid: pid)
+            let project = resolveProjectName(cwd: projectCwd)
             let stats = getProcessStats(pid: pid)
 
             results.append(PortInfo(
@@ -122,6 +291,7 @@ final class PortScanner: ObservableObject {
                 address: address,
                 serverLabel: label,
                 projectName: project,
+                projectPath: projectCwd,
                 cpuPercent: stats.cpu,
                 memMB: stats.mem,
                 isSuspended: stats.suspended
@@ -169,8 +339,7 @@ final class PortScanner: ObservableObject {
 
     /// Get the working directory of a process, then derive the project name
     /// from package.json "name" field, or fall back to the directory name.
-    private static func resolveProjectName(pid: Int) -> String {
-        let cwd = getProcessCwd(pid: pid)
+    private static func resolveProjectName(cwd: String) -> String {
         guard !cwd.isEmpty, cwd != "/" else { return "" }
 
         // Try package.json in cwd

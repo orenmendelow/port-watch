@@ -25,7 +25,8 @@ struct PortWatchApp: App {
 
 struct PortWatchPanel: View {
     @ObservedObject var scanner: PortScanner
-    @State private var hoveredPid: Int?
+    @State private var hoveredPort: Int?
+    @State private var hoveredSession: String?
     @State private var confirmingKillAll = false
 
     private let headerFont = Font.system(size: 10, weight: .regular, design: .monospaced)
@@ -40,9 +41,9 @@ struct PortWatchPanel: View {
                     .padding(.vertical, 20)
             } else {
                 ForEach(scanner.ports) { port in
-                    PortRow(port: port, scanner: scanner, isHovered: hoveredPid == port.pid)
+                    PortRow(port: port, scanner: scanner, isHovered: hoveredPort == port.port)
                         .onHover { hovering in
-                            hoveredPid = hovering ? port.pid : nil
+                            hoveredPort = hovering ? port.port : nil
                         }
                 }
 
@@ -74,6 +75,25 @@ struct PortWatchPanel: View {
                     }
                 }
                 .padding(.horizontal, 12)
+            }
+
+            // Terminal sessions section
+            if !scanner.sessions.isEmpty {
+                Divider()
+                    .padding(.vertical, 6)
+
+                Text("TERMINAL SESSIONS")
+                    .font(headerFont)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 2)
+
+                ForEach(scanner.sessions) { session in
+                    SessionRow(session: session, scanner: scanner, isHovered: hoveredSession == session.tty)
+                        .onHover { hovering in
+                            hoveredSession = hovering ? session.tty : nil
+                        }
+                }
             }
 
             Divider()
@@ -164,10 +184,10 @@ struct PortRow: View {
 
             // Right side: action buttons on hover replace the stats columns
             if isHovered {
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     IconHoverButton(
                         systemName: "arrow.up.right.square",
-                        size: 14,
+                        size: 13,
                         color: .primary,
                         action: {
                             if let url = URL(string: "http://localhost:\(port.port)") {
@@ -179,7 +199,7 @@ struct PortRow: View {
 
                     IconHoverButton(
                         systemName: port.isSuspended ? "play.circle.fill" : "pause.circle.fill",
-                        size: 14,
+                        size: 13,
                         color: .primary,
                         action: { scanner.toggleSuspend(pid: port.pid) },
                         tooltip: port.isSuspended ? "Resume" : "Pause"
@@ -187,18 +207,18 @@ struct PortRow: View {
 
                     IconHoverButton(
                         systemName: "xmark.circle.fill",
-                        size: 14,
+                        size: 13,
                         color: .red,
                         action: { scanner.killProcess(pid: port.pid) },
                         tooltip: "Kill"
                     )
                 }
-                .frame(width: 78, alignment: .trailing)
+                .frame(width: 90, alignment: .trailing)
             } else if port.isSuspended {
                 Text("paused")
                     .font(monoSmall)
                     .foregroundStyle(.yellow.opacity(0.8))
-                    .frame(width: 78, alignment: .trailing)
+                    .frame(width: 90, alignment: .trailing)
             } else {
                 HStack(spacing: 4) {
                     Text(String(format: "%.0f%%", port.cpuPercent))
@@ -211,11 +231,64 @@ struct PortRow: View {
                         .foregroundStyle(.secondary)
                         .frame(width: 42, alignment: .trailing)
                 }
-                .frame(width: 78, alignment: .trailing)
+                .frame(width: 90, alignment: .trailing)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+        .background(isHovered ? .white.opacity(0.05) : .clear)
+        .contentShape(Rectangle())
+    }
+
+    private func formatMem(_ mb: Double) -> String {
+        if mb >= 1024 {
+            return String(format: "%.1fG", mb / 1024)
+        }
+        return String(format: "%.0fM", mb)
+    }
+}
+
+struct SessionRow: View {
+    let session: TerminalSession
+    let scanner: PortScanner
+    let isHovered: Bool
+
+    private let monoSmall = Font.system(size: 10, weight: .regular, design: .monospaced)
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(session.label)
+                .font(.system(size: 12, weight: .regular, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+
+            if isHovered {
+                IconHoverButton(
+                    systemName: "macwindow",
+                    size: 13,
+                    color: .primary,
+                    action: { scanner.focusTerminalSession(session) },
+                    tooltip: "Show window"
+                )
+                .frame(width: 90, alignment: .trailing)
+            } else {
+                HStack(spacing: 4) {
+                    Text(String(format: "%.0f%%", session.cpuPercent))
+                        .font(monoSmall)
+                        .foregroundStyle(session.cpuPercent > 50 ? .red : .secondary)
+                        .frame(width: 32, alignment: .trailing)
+
+                    Text(formatMem(session.memMB))
+                        .font(monoSmall)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 42, alignment: .trailing)
+                }
+                .frame(width: 90, alignment: .trailing)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
         .background(isHovered ? .white.opacity(0.05) : .clear)
         .contentShape(Rectangle())
     }
