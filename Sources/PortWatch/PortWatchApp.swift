@@ -1,25 +1,57 @@
 import SwiftUI
+import AppKit
+
+class AppDelegate: NSObject, NSApplicationDelegate {
+    var statusItem: NSStatusItem!
+    var popover: NSPopover!
+    var scanner: PortScanner!
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        scanner = PortScanner()
+        scanner.start()
+
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+
+        if let button = statusItem.button {
+            button.image = NSImage(systemSymbolName: "antenna.radiowaves.left.and.right", accessibilityDescription: "PortWatch")
+            button.action = #selector(togglePopover)
+            button.target = self
+        }
+
+        popover = NSPopover()
+        popover.contentSize = NSSize(width: 280, height: 400)
+        popover.behavior = .transient
+        popover.contentViewController = NSHostingController(rootView: PortWatchPanel(scanner: scanner))
+
+        Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            let symbolName = self.scanner.ports.isEmpty
+                ? "antenna.radiowaves.left.and.right"
+                : "antenna.radiowaves.left.and.right.circle.fill"
+            self.statusItem.button?.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "PortWatch")
+            self.popover.contentViewController = NSHostingController(rootView: PortWatchPanel(scanner: self.scanner))
+        }
+    }
+
+    @objc func togglePopover() {
+        if popover.isShown {
+            popover.performClose(nil)
+        } else if let button = statusItem.button {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            // Make sure the popover window is key so it renders at full opacity
+            popover.contentViewController?.view.window?.makeKey()
+        }
+    }
+}
 
 @main
 struct PortWatchApp: App {
-    @StateObject private var scanner: PortScanner
-
-    init() {
-        let s = PortScanner()
-        s.start()
-        _scanner = StateObject(wrappedValue: s)
-    }
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        MenuBarExtra {
-            PortWatchPanel(scanner: scanner)
-        } label: {
-            Image(systemName: scanner.ports.isEmpty
-                  ? "antenna.radiowaves.left.and.right"
-                  : "antenna.radiowaves.left.and.right.circle.fill")
-                .symbolRenderingMode(.hierarchical)
+        Settings {
+            EmptyView()
         }
-        .menuBarExtraStyle(.window)
     }
 }
 
@@ -33,12 +65,20 @@ struct PortWatchPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // Ports section
+            Text("PORTS")
+                .font(headerFont)
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+
             if scanner.ports.isEmpty {
                 Text("no active ports")
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
             } else {
                 ForEach(scanner.ports) { port in
                     PortRow(port: port, scanner: scanner, isHovered: hoveredPort == port.port)
@@ -46,15 +86,41 @@ struct PortWatchPanel: View {
                             hoveredPort = hovering ? port.port : nil
                         }
                 }
+            }
 
+            // Terminal sessions section
+            if !scanner.sessions.isEmpty {
                 Divider()
-                    .padding(.top, 8)
-                    .padding(.bottom, 6)
+                    .padding(.vertical, 6)
 
-                HStack {
-                    Spacer()
+                Text("SESSIONS")
+                    .font(headerFont)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 4)
+
+                ForEach(scanner.sessions) { session in
+                    SessionRow(session: session, scanner: scanner, isHovered: hoveredSession == session.tty)
+                        .onHover { hovering in
+                            hoveredSession = hovering ? session.tty : nil
+                        }
+                }
+            }
+
+            Divider()
+                .padding(.vertical, 6)
+
+            // Footer
+            HStack(spacing: 0) {
+                Text("portwatch")
+                    .font(headerFont)
+                    .foregroundStyle(.tertiary)
+
+                Spacer()
+
+                if !scanner.ports.isEmpty {
                     if confirmingKillAll {
-                        HStack(spacing: 8) {
+                        HStack(spacing: 6) {
                             Text("kill all?")
                                 .font(headerFont)
                                 .foregroundStyle(.red.opacity(0.8))
@@ -73,37 +139,12 @@ struct PortWatchPanel: View {
                             confirmingKillAll = true
                         }
                     }
+
+                    Text(" · ")
+                        .font(headerFont)
+                        .foregroundStyle(.tertiary)
                 }
-                .padding(.horizontal, 12)
-            }
 
-            // Terminal sessions section
-            if !scanner.sessions.isEmpty {
-                Divider()
-                    .padding(.vertical, 6)
-
-                Text("TERMINAL SESSIONS")
-                    .font(headerFont)
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 2)
-
-                ForEach(scanner.sessions) { session in
-                    SessionRow(session: session, scanner: scanner, isHovered: hoveredSession == session.tty)
-                        .onHover { hovering in
-                            hoveredSession = hovering ? session.tty : nil
-                        }
-                }
-            }
-
-            Divider()
-                .padding(.vertical, 6)
-
-            HStack {
-                Text("portwatch")
-                    .font(headerFont)
-                    .foregroundStyle(.tertiary)
-                Spacer()
                 HoverButton(label: "quit", color: .secondary, font: headerFont) {
                     NSApplication.shared.terminate(nil)
                 }
@@ -111,7 +152,7 @@ struct PortWatchPanel: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 8)
         }
-        .frame(width: 280)
+        .frame(width: 340)
     }
 }
 
@@ -182,13 +223,12 @@ struct PortRow: View {
                 .truncationMode(.tail)
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
 
-            // Right side: action buttons on hover replace the stats columns
             if isHovered {
                 HStack(spacing: 8) {
                     IconHoverButton(
                         systemName: "arrow.up.right.square",
-                        size: 13,
-                        color: .primary,
+                        size: 14,
+                        color: .white,
                         action: {
                             if let url = URL(string: "http://localhost:\(port.port)") {
                                 NSWorkspace.shared.open(url)
@@ -199,15 +239,15 @@ struct PortRow: View {
 
                     IconHoverButton(
                         systemName: port.isSuspended ? "play.circle.fill" : "pause.circle.fill",
-                        size: 13,
-                        color: .primary,
+                        size: 14,
+                        color: .white,
                         action: { scanner.toggleSuspend(pid: port.pid) },
                         tooltip: port.isSuspended ? "Resume" : "Pause"
                     )
 
                     IconHoverButton(
                         systemName: "xmark.circle.fill",
-                        size: 13,
+                        size: 14,
                         color: .red,
                         action: { scanner.killProcess(pid: port.pid) },
                         tooltip: "Kill"
@@ -236,7 +276,7 @@ struct PortRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(isHovered ? .white.opacity(0.05) : .clear)
+        .background(isHovered ? .white.opacity(0.1) : .clear)
         .contentShape(Rectangle())
     }
 
@@ -266,8 +306,8 @@ struct SessionRow: View {
             if isHovered {
                 IconHoverButton(
                     systemName: "macwindow",
-                    size: 13,
-                    color: .primary,
+                    size: 14,
+                    color: .white,
                     action: { scanner.focusTerminalSession(session) },
                     tooltip: "Show window"
                 )
@@ -289,7 +329,7 @@ struct SessionRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
-        .background(isHovered ? .white.opacity(0.05) : .clear)
+        .background(isHovered ? .white.opacity(0.1) : .clear)
         .contentShape(Rectangle())
     }
 
